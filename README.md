@@ -90,6 +90,15 @@ curl -X POST http://localhost:3000/api/ingest \
   -d '{"fromDate":"2026-02-01"}'
 ```
 
+
+If OpenAlex is unreachable, force mock literature fallback:
+
+```bash
+curl -X POST 'http://localhost:3000/api/ingest?useMockFallback=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"fromDate":"2026-02-01","useMockFallback":true}'
+```
+
 ## Query opportunities API
 
 Example:

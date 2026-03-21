@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { classifyOpportunity } from "../../lib/classify";
 import { initDb, upsertOpportunities } from "../../lib/db";
-import { fetchOpenAlexWorks } from "../../lib/openalex";
+import { buildOpenAlexUrl, fetchOpenAlexWorks } from "../../lib/openalex";
 import { fetchPatentOpportunitiesStub } from "../../lib/patents";
 import { scoreOpportunity } from "../../lib/score";
 
@@ -23,7 +23,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     initDb();
 
     const fromDate = typeof req.body?.fromDate === "string" ? req.body.fromDate : new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
-    const openAlex = await fetchOpenAlexWorks({ fromDate });
+    const openAlexUrl = buildOpenAlexUrl({ fromDate });
+
+    let openAlex;
+    try {
+      openAlex = await fetchOpenAlexWorks({ fromDate });
+    } catch (error) {
+      const detailedError = error instanceof Error ? error.message : String(error);
+      return res.status(502).json({
+        ok: false,
+        fromDate,
+        openAlexUrl,
+        error: detailedError,
+      });
+    }
+
     const patents = await fetchPatentOpportunitiesStub();
     const combined = [...openAlex, ...patents];
 
@@ -65,13 +79,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({
       ok: true,
       fromDate,
+      openAlexUrl,
+      openAlexCount: openAlex.length,
+      patentCount: patents.length,
       insertedOrUpdated: outcome.insertedOrUpdated,
       sample: enriched.slice(0, 5),
     });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: (error as Error).message,
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }
