@@ -17,6 +17,10 @@ type Opportunity = {
   score_commercial: number | null;
   score_institution: number | null;
   location: string | null;
+  matched_institution_ids?: string | null;
+  matched_institution_names?: string | null;
+  source_reason?: string | null;
+  openalex_filter_used?: string | null;
 };
 
 type ApiResponse = {
@@ -255,6 +259,9 @@ export default function DashboardPage() {
                 <div className="mt-3 text-sm text-slate-700">
                   <strong>Keywords:</strong> {op.keywords ?? "n/a"}
                 </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  <strong>Why included:</strong> {op.source_reason ?? "No source trace available"}
+                </div>
 
                 <button
                   onClick={() => setExpanded((prev) => ({ ...prev, [op.id]: !open }))}
@@ -271,6 +278,9 @@ export default function DashboardPage() {
                     </p>
                     <p className="mt-1">
                       PI Track Record: 0 • Patent-Paper Overlap: 0
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Matched institutions: {op.matched_institution_names || "n/a"} ({op.matched_institution_ids || "n/a"})
                     </p>
                     {op.url && (
                       <a className="mt-2 inline-block text-indigo-600 hover:underline" href={op.url} target="_blank" rel="noreferrer">

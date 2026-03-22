@@ -11,21 +11,29 @@ export type OpenAlexNormalizedWork = {
   doi: string | null;
   url: string | null;
   cited_by_count: number;
+  authorship_institution_ids: string[];
+  authorship_institution_names: string[];
+  matched_institution_ids: string[];
+  matched_institution_names: string[];
+  source_reason: string;
+  openalex_filter_used: string;
   raw: unknown;
 };
 
 const OPENALEX_WORKS_URL = "https://api.openalex.org/works";
 
-export const DEFAULT_INSTITUTION_IDS = [
-  "I149506389", // Rice University
-  "I71493762", // Baylor College of Medicine
-  "I421010500", // UTHealth Houston (The University of Texas Health Science Center at Houston)
-  "I5014037", // The University of Texas MD Anderson Cancer Center
-];
+export const TARGET_INSTITUTIONS: Record<string, string> = {
+  I149506389: "Rice University", // Rice University
+  I71493762: "Baylor College of Medicine", // Baylor College of Medicine
+  I421010500: "UTHealth Houston", // UTHealth Houston (The University of Texas Health Science Center at Houston)
+  I5014037: "MD Anderson", // The University of Texas MD Anderson Cancer Center
+};
+
+export const DEFAULT_INSTITUTION_IDS = Object.keys(TARGET_INSTITUTIONS);
 
 type RawAuthorship = {
   author?: { display_name?: string };
-  institutions?: Array<{ display_name?: string }>;
+  institutions?: Array<{ id?: string; display_name?: string }>;
 };
 
 function parseAbstract(invertedIndex?: Record<string, number[]>): string | null {
@@ -43,7 +51,23 @@ function parseAbstract(invertedIndex?: Record<string, number[]>): string | null 
   return positionedWords.map((w) => w.word).join(" ");
 }
 
-function normalizeWorks(works: Array<Record<string, unknown>>): OpenAlexNormalizedWork[] {
+function toInstitutionId(id: string): string {
+  return id.replace("https://openalex.org/", "").trim();
+}
+
+function uniq(values: string[]): string[] {
+  return values.filter((value, index, arr) => value && arr.indexOf(value) === index);
+}
+
+function getFilterString(fromDate: string, institutionIds: string[]) {
+  const filters = [`from_publication_date:${fromDate}`];
+  if (institutionIds.length > 0) {
+    filters.push(`institutions.id:${institutionIds.join("|")}`);
+  }
+  return filters.join(",");
+}
+
+function normalizeWorks(works: Array<Record<string, unknown>>, filterUsed: string): OpenAlexNormalizedWork[] {
   return works
     .filter((work) => work?.id && work?.title)
     .map((work) => {
@@ -55,13 +79,22 @@ function normalizeWorks(works: Array<Record<string, unknown>>): OpenAlexNormaliz
         .filter((value): value is string => Boolean(value))
         .join(", ");
 
-      const institutionNames = authorships
-        .flatMap((a) => (Array.isArray(a.institutions) ? a.institutions : []))
-        .map((i) => i.display_name)
-        .filter((value): value is string => Boolean(value))
-        .filter((name, index, arr) => arr.indexOf(name) === index)
-        .join(", ");
+      const authInstitutionIds = uniq(
+        authorships
+          .flatMap((a) => (Array.isArray(a.institutions) ? a.institutions : []))
+          .map((i) => (i.id ? toInstitutionId(i.id) : ""))
+      );
 
+      const authInstitutionNames = uniq(
+        authorships
+          .flatMap((a) => (Array.isArray(a.institutions) ? a.institutions : []))
+          .map((i) => i.display_name ?? "")
+      );
+
+      const matchedIds = authInstitutionIds.filter((id) => Boolean(TARGET_INSTITUTIONS[id]));
+      const matchedNames = matchedIds.map((id) => TARGET_INSTITUTIONS[id]);
+
+      const institutionNamesJoined = authInstitutionNames.join(", ");
       const primaryLocation = (raw.primary_location ?? null) as { landing_page_url?: string } | null;
 
       return {
@@ -70,11 +103,20 @@ function normalizeWorks(works: Array<Record<string, unknown>>): OpenAlexNormaliz
         title: String(raw.title),
         abstract: parseAbstract((raw.abstract_inverted_index ?? undefined) as Record<string, number[]> | undefined),
         authors: authorNames,
-        institutions: institutionNames,
+        institutions: institutionNamesJoined,
         date: typeof raw.publication_date === "string" ? raw.publication_date : null,
         doi: typeof raw.doi === "string" ? raw.doi : null,
         url: typeof primaryLocation?.landing_page_url === "string" ? primaryLocation.landing_page_url : String(raw.id),
         cited_by_count: Number(raw.cited_by_count ?? 0),
+        authorship_institution_ids: authInstitutionIds,
+        authorship_institution_names: authInstitutionNames,
+        matched_institution_ids: matchedIds,
+        matched_institution_names: matchedNames,
+        source_reason:
+          matchedNames.length > 0
+            ? `Matched OpenAlex institution filter: ${matchedNames.join(", ")}`
+            : "Matched OpenAlex query (no approved institution confirmed)",
+        openalex_filter_used: filterUsed,
         raw,
       };
     });
@@ -164,13 +206,10 @@ export function buildOpenAlexUrl({
   perPage?: number;
 }) {
   const safePerPage = Math.min(Math.max(perPage, 1), 200);
-  const filters = [`from_publication_date:${fromDate}`];
-  if (institutionIds.length > 0) {
-    filters.push(`institutions.id:${institutionIds.join("|")}`);
-  }
+  const filter = getFilterString(fromDate, institutionIds);
 
   const params = new URLSearchParams({
-    filter: filters.join(","),
+    filter,
     per_page: String(safePerPage),
   });
 
@@ -188,6 +227,7 @@ export async function fetchOpenAlexWorks({
   perPage?: number;
   timeoutMs?: number;
 }): Promise<OpenAlexNormalizedWork[]> {
+  const filterUsed = getFilterString(fromDate, institutionIds);
   const url = buildOpenAlexUrl({ fromDate, institutionIds, perPage });
   console.info(`[OpenAlex] Request URL: ${url}`);
 
@@ -198,7 +238,7 @@ export async function fetchOpenAlexWorks({
       console.info(`[OpenAlex] Attempt ${attempt}/3 via fetch`);
       const body = await fetchViaGlobal(url, timeoutMs);
       const json = JSON.parse(body) as { results?: Array<Record<string, unknown>> };
-      return normalizeWorks(json.results ?? []);
+      return normalizeWorks(json.results ?? [], filterUsed);
     } catch (fetchErr) {
       const fetchDetails = extractErrorDetails(fetchErr);
       attemptErrors.push(`attempt ${attempt} fetch failed: ${fetchDetails}`);
@@ -208,7 +248,7 @@ export async function fetchOpenAlexWorks({
         console.info(`[OpenAlex] Attempt ${attempt}/3 via node:https fallback`);
         const body = await fetchViaHttps(url, timeoutMs);
         const json = JSON.parse(body) as { results?: Array<Record<string, unknown>> };
-        return normalizeWorks(json.results ?? []);
+        return normalizeWorks(json.results ?? [], filterUsed);
       } catch (httpsErr) {
         const httpsDetails = extractErrorDetails(httpsErr);
         attemptErrors.push(`attempt ${attempt} https failed: ${httpsDetails}`);

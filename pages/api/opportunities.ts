@@ -24,7 +24,31 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       offset: typeof offset === "string" ? Number(offset) : undefined,
     });
 
-    return res.status(200).json(data);
+    const cleanResults = data.results.map((row) => ({
+      id: row.id,
+      source: row.source,
+      title: row.title,
+      abstract: row.abstract,
+      authors: row.authors,
+      institutions: row.institutions,
+      date: row.date,
+      doi: row.doi,
+      url: row.url,
+      category: row.category,
+      keywords: row.keywords,
+      score_total: row.score_total,
+      score_novelty: row.score_novelty,
+      score_momentum: row.score_momentum,
+      score_commercial: row.score_commercial,
+      score_institution: row.score_institution,
+      location: row.location,
+      matched_institution_ids: row.matched_institution_ids,
+      matched_institution_names: row.matched_institution_names,
+      source_reason: row.source_reason,
+      openalex_filter_used: row.openalex_filter_used,
+    }));
+
+    return res.status(200).json({ results: cleanResults, total: data.total });
   } catch (error) {
     return res.status(500).json({ error: (error as Error).message });
   }

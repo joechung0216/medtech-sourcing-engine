@@ -20,6 +20,10 @@ export type Opportunity = {
   score_commercial: number | null;
   score_institution: number | null;
   location: string | null;
+  matched_institution_ids: string | null;
+  matched_institution_names: string | null;
+  source_reason: string | null;
+  openalex_filter_used: string | null;
   raw_json: string | null;
 };
 
@@ -49,6 +53,24 @@ function getDb(): Database.Database {
   return dbInstance;
 }
 
+function ensureTraceabilityColumns(db: Database.Database) {
+  const columns = db.prepare("PRAGMA table_info(opportunities)").all() as Array<{ name: string }>;
+  const existing = new Set(columns.map((c) => c.name));
+
+  const alters = [
+    ["matched_institution_ids", "TEXT"],
+    ["matched_institution_names", "TEXT"],
+    ["source_reason", "TEXT"],
+    ["openalex_filter_used", "TEXT"],
+  ] as const;
+
+  for (const [column, type] of alters) {
+    if (!existing.has(column)) {
+      db.exec(`ALTER TABLE opportunities ADD COLUMN ${column} ${type}`);
+    }
+  }
+}
+
 export function initDb(): void {
   const db = getDb();
 
@@ -71,6 +93,10 @@ export function initDb(): void {
       score_commercial REAL,
       score_institution REAL,
       location TEXT,
+      matched_institution_ids TEXT,
+      matched_institution_names TEXT,
+      source_reason TEXT,
+      openalex_filter_used TEXT,
       raw_json TEXT,
       ingested_at TEXT DEFAULT (datetime('now'))
     );
@@ -79,6 +105,8 @@ export function initDb(): void {
     CREATE INDEX IF NOT EXISTS idx_opportunities_score_total ON opportunities(score_total DESC);
     CREATE INDEX IF NOT EXISTS idx_opportunities_date ON opportunities(date DESC);
   `);
+
+  ensureTraceabilityColumns(db);
 }
 
 export function upsertOpportunities(items: Opportunity[]): { insertedOrUpdated: number } {
@@ -87,11 +115,15 @@ export function upsertOpportunities(items: Opportunity[]): { insertedOrUpdated: 
     INSERT INTO opportunities (
       id, source, title, abstract, authors, institutions, date, doi, url,
       category, keywords, score_total, score_novelty, score_momentum,
-      score_commercial, score_institution, location, raw_json
+      score_commercial, score_institution, location,
+      matched_institution_ids, matched_institution_names, source_reason, openalex_filter_used,
+      raw_json
     ) VALUES (
       @id, @source, @title, @abstract, @authors, @institutions, @date, @doi, @url,
       @category, @keywords, @score_total, @score_novelty, @score_momentum,
-      @score_commercial, @score_institution, @location, @raw_json
+      @score_commercial, @score_institution, @location,
+      @matched_institution_ids, @matched_institution_names, @source_reason, @openalex_filter_used,
+      @raw_json
     )
     ON CONFLICT(id) DO UPDATE SET
       source=excluded.source,
@@ -110,6 +142,10 @@ export function upsertOpportunities(items: Opportunity[]): { insertedOrUpdated: 
       score_commercial=excluded.score_commercial,
       score_institution=excluded.score_institution,
       location=excluded.location,
+      matched_institution_ids=excluded.matched_institution_ids,
+      matched_institution_names=excluded.matched_institution_names,
+      source_reason=excluded.source_reason,
+      openalex_filter_used=excluded.openalex_filter_used,
       raw_json=excluded.raw_json,
       ingested_at=datetime('now')
   `);

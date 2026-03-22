@@ -13,6 +13,10 @@ function deriveLocation(institutions: string): string {
   return "Unknown";
 }
 
+function keepApprovedOpenAlexRows<T extends { matched_institution_ids: string[] }>(rows: T[]): T[] {
+  return rows.filter((row) => row.matched_institution_ids.length > 0);
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -27,7 +31,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let openAlex;
     try {
-      openAlex = await fetchOpenAlexWorks({ fromDate });
+      const fetchedOpenAlex = await fetchOpenAlexWorks({ fromDate });
+      openAlex = keepApprovedOpenAlexRows(fetchedOpenAlex);
     } catch (error) {
       const detailedError = error instanceof Error ? error.message : String(error);
       return res.status(502).json({
@@ -52,6 +57,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         institutions: item.institutions,
       });
 
+      const matchedIds = Array.isArray((item as { matched_institution_ids?: string[] }).matched_institution_ids)
+        ? (item as { matched_institution_ids: string[] }).matched_institution_ids
+        : [];
+      const matchedNames = Array.isArray((item as { matched_institution_names?: string[] }).matched_institution_names)
+        ? (item as { matched_institution_names: string[] }).matched_institution_names
+        : [];
+
       return {
         id: item.id,
         source: item.source,
@@ -70,6 +82,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         score_commercial: score.commercial,
         score_institution: score.institution,
         location: deriveLocation(item.institutions),
+        matched_institution_ids: matchedIds.join(", ") || null,
+        matched_institution_names: matchedNames.join(", ") || null,
+        source_reason:
+          item.source === "openalex"
+            ? `Matched OpenAlex institution filter: ${matchedNames.join(", ")}`
+            : "Matched patent stub provider",
+        openalex_filter_used: item.source === "openalex" ? (item as { openalex_filter_used?: string }).openalex_filter_used ?? null : null,
         raw_json: JSON.stringify(item.raw),
       };
     });
@@ -92,6 +111,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         category: item.category,
         score_total: item.score_total,
         location: item.location,
+        source_reason: item.source_reason,
+        matched_institution_ids: item.matched_institution_ids,
+        matched_institution_names: item.matched_institution_names,
       })),
     });
   } catch (error) {
