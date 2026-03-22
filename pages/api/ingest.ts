@@ -83,7 +83,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       openAlexCount: openAlex.length,
       patentCount: patents.length,
       insertedOrUpdated: outcome.insertedOrUpdated,
-      sample: enriched.slice(0, 5),
+      sample: enriched.slice(0, 5).map((item) => ({
+        id: item.id,
+        source: item.source,
+        title: item.title,
+        institutions: item.institutions,
+        date: item.date,
+        category: item.category,
+        score_total: item.score_total,
+        location: item.location,
+      })),
     });
   } catch (error) {
     return res.status(500).json({

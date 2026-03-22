@@ -24,6 +24,26 @@ type ApiResponse = {
   total: number;
 };
 
+type IngestResponse = {
+  ok: boolean;
+  fromDate: string;
+  openAlexUrl: string;
+  openAlexCount: number;
+  patentCount: number;
+  insertedOrUpdated: number;
+  sample: Array<{
+    id: string;
+    source: string;
+    title: string;
+    institutions: string | null;
+    date: string | null;
+    category: string | null;
+    score_total: number | null;
+    location: string | null;
+  }>;
+  error?: string;
+};
+
 const categories = [
   "",
   "diagnostics",
@@ -47,6 +67,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [ingestLoading, setIngestLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse>({ results: [], total: 0 });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -85,6 +106,7 @@ export default function DashboardPage() {
   async function runIngest() {
     setIngestLoading(true);
     setError(null);
+    setIngestMessage(null);
     try {
       const fromDate = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
       const response = await fetch("/api/ingest", {
@@ -92,7 +114,15 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fromDate }),
       });
-      if (!response.ok) throw new Error(`Ingest failed: ${response.status}`);
+
+      const json = (await response.json()) as IngestResponse;
+      if (!response.ok || !json.ok) {
+        throw new Error(json.error || `Ingest failed: ${response.status}`);
+      }
+
+      setIngestMessage(
+        `Ingest complete: ${json.insertedOrUpdated} rows upserted (${json.openAlexCount} OpenAlex, ${json.patentCount} patents).`
+      );
       await loadData();
     } catch (err) {
       setError((err as Error).message);
@@ -157,10 +187,11 @@ export default function DashboardPage() {
           />
         </form>
 
-        {loading && <div className="rounded bg-white p-4 shadow">Loading opportunities...</div>}
-        {error && <div className="rounded bg-red-100 p-4 text-red-700">{error}</div>}
+        {ingestMessage && <div className="mb-3 rounded bg-emerald-100 p-3 text-emerald-800">{ingestMessage}</div>}
+        {loading && <div className="mb-3 rounded bg-blue-50 p-4 text-blue-800 shadow">Loading opportunities...</div>}
+        {error && <div className="mb-3 rounded bg-red-100 p-4 text-red-700">Error: {error}</div>}
         {!loading && !error && data.results.length === 0 && (
-          <div className="rounded bg-white p-8 text-center text-slate-500 shadow">No opportunities found. Try running ingestion or relaxing filters.</div>
+          <div className="mb-3 rounded bg-white p-8 text-center text-slate-500 shadow">No opportunities found. Try running ingestion or relaxing filters.</div>
         )}
 
         <div className="mb-3 text-sm text-slate-600">Total results: {data.total}</div>
@@ -178,7 +209,9 @@ export default function DashboardPage() {
                       <span className="rounded bg-indigo-100 px-2 py-0.5 text-indigo-700">{op.category ?? "unclassified"}</span>
                     </div>
                     <h2 className="text-lg font-semibold">{op.title}</h2>
-                    <p className="text-xs text-slate-500">{op.date ?? "n/a"} • {op.location ?? "Unknown"}</p>
+                    <p className="text-xs text-slate-500">
+                      {op.date ?? "n/a"} • {op.location ?? "Unknown"}
+                    </p>
                   </div>
                   <div className="min-w-32 text-right">
                     <div className="text-sm font-medium">Score {score.toFixed(1)}</div>
@@ -189,8 +222,12 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-700">
-                  <span><strong>Institution:</strong> {op.institutions ?? "n/a"}</span>
-                  <span><strong>Keywords:</strong> {op.keywords ?? "n/a"}</span>
+                  <span>
+                    <strong>Institution:</strong> {op.institutions ?? "n/a"}
+                  </span>
+                  <span>
+                    <strong>Keywords:</strong> {op.keywords ?? "n/a"}
+                  </span>
                 </div>
 
                 <button
@@ -203,7 +240,9 @@ export default function DashboardPage() {
                 {open && (
                   <div className="mt-3 rounded bg-slate-50 p-3 text-sm">
                     <p className="mb-2 whitespace-pre-wrap">{op.abstract || "No abstract available."}</p>
-                    <p>Novelty: {op.score_novelty} • Momentum: {op.score_momentum} • Commercial: {op.score_commercial} • Institution: {op.score_institution}</p>
+                    <p>
+                      Novelty: {op.score_novelty} • Momentum: {op.score_momentum} • Commercial: {op.score_commercial} • Institution: {op.score_institution}
+                    </p>
                     {op.url && (
                       <a className="mt-2 inline-block text-indigo-600 hover:underline" href={op.url} target="_blank" rel="noreferrer">
                         Open source link
