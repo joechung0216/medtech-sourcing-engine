@@ -267,7 +267,10 @@ export default function DashboardPage() {
                   <div className="mt-3 rounded bg-slate-50 p-3 text-sm">
                     <p className="mb-2 whitespace-pre-wrap">{op.abstract || "No abstract available."}</p>
                     <p>
-                      Novelty: {op.score_novelty} • Momentum: {op.score_momentum} • Commercial: {op.score_commercial} • Institution: {op.score_institution}
+                      Translational: {op.score_novelty} • Institution: {op.score_institution} • Category: {op.score_commercial} • Recency: {op.score_momentum}
+                    </p>
+                    <p className="mt-1">
+                      PI Track Record: 0 • Patent-Paper Overlap: 0
                     </p>
                     {op.url && (
                       <a className="mt-2 inline-block text-indigo-600 hover:underline" href={op.url} target="_blank" rel="noreferrer">
