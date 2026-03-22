@@ -1,5 +1,7 @@
 import https from "node:https";
 
+export type IngestMode = "targeted" | "exploration";
+
 export type OpenAlexNormalizedWork = {
   id: string;
   source: "openalex";
@@ -20,7 +22,15 @@ export type OpenAlexNormalizedWork = {
   raw: unknown;
 };
 
+export type OpenAlexFetchResult = {
+  works: OpenAlexNormalizedWork[];
+  pagesFetched: number;
+  filtersUsed: string[];
+  requestUrls: string[];
+};
+
 const OPENALEX_WORKS_URL = "https://api.openalex.org/works";
+const EXPLORATION_SEARCH_QUERY = "medical device medtech biomedical";
 
 export const TARGET_INSTITUTIONS: Record<string, string> = {
   I149506389: "Rice University", // Rice University
@@ -59,9 +69,9 @@ function uniq(values: string[]): string[] {
   return values.filter((value, index, arr) => value && arr.indexOf(value) === index);
 }
 
-function getFilterString(fromDate: string, institutionIds: string[]) {
+function getFilterString(fromDate: string, institutionIds: string[], mode: IngestMode) {
   const filters = [`from_publication_date:${fromDate}`];
-  if (institutionIds.length > 0) {
+  if (mode === "targeted" && institutionIds.length > 0) {
     filters.push(`institutions.id:${institutionIds.join("|")}`);
   }
   return filters.join(",");
@@ -115,7 +125,7 @@ function normalizeWorks(works: Array<Record<string, unknown>>, filterUsed: strin
         source_reason:
           matchedNames.length > 0
             ? `Matched OpenAlex institution filter: ${matchedNames.join(", ")}`
-            : "Matched OpenAlex query (no approved institution confirmed)",
+            : "Matched OpenAlex exploration query",
         openalex_filter_used: filterUsed,
         raw,
       };
@@ -200,45 +210,39 @@ export function buildOpenAlexUrl({
   fromDate,
   institutionIds = DEFAULT_INSTITUTION_IDS,
   perPage = 100,
+  page = 1,
+  mode = "targeted",
 }: {
   fromDate: string;
   institutionIds?: string[];
   perPage?: number;
+  page?: number;
+  mode?: IngestMode;
 }) {
   const safePerPage = Math.min(Math.max(perPage, 1), 200);
-  const filter = getFilterString(fromDate, institutionIds);
+  const filter = getFilterString(fromDate, institutionIds, mode);
 
   const params = new URLSearchParams({
     filter,
     per_page: String(safePerPage),
+    page: String(page),
   });
+
+  if (mode === "exploration") {
+    params.set("search", EXPLORATION_SEARCH_QUERY);
+  }
 
   return `${OPENALEX_WORKS_URL}?${params.toString()}`;
 }
 
-export async function fetchOpenAlexWorks({
-  fromDate,
-  institutionIds = DEFAULT_INSTITUTION_IDS,
-  perPage = 100,
-  timeoutMs = 15000,
-}: {
-  fromDate: string;
-  institutionIds?: string[];
-  perPage?: number;
-  timeoutMs?: number;
-}): Promise<OpenAlexNormalizedWork[]> {
-  const filterUsed = getFilterString(fromDate, institutionIds);
-  const url = buildOpenAlexUrl({ fromDate, institutionIds, perPage });
-  console.info(`[OpenAlex] Request URL: ${url}`);
-
+async function fetchOpenAlexPage(url: string, timeoutMs: number): Promise<{ results: Array<Record<string, unknown>> }> {
   const attemptErrors: string[] = [];
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       console.info(`[OpenAlex] Attempt ${attempt}/3 via fetch`);
       const body = await fetchViaGlobal(url, timeoutMs);
-      const json = JSON.parse(body) as { results?: Array<Record<string, unknown>> };
-      return normalizeWorks(json.results ?? [], filterUsed);
+      return JSON.parse(body) as { results: Array<Record<string, unknown>> };
     } catch (fetchErr) {
       const fetchDetails = extractErrorDetails(fetchErr);
       attemptErrors.push(`attempt ${attempt} fetch failed: ${fetchDetails}`);
@@ -247,8 +251,7 @@ export async function fetchOpenAlexWorks({
       try {
         console.info(`[OpenAlex] Attempt ${attempt}/3 via node:https fallback`);
         const body = await fetchViaHttps(url, timeoutMs);
-        const json = JSON.parse(body) as { results?: Array<Record<string, unknown>> };
-        return normalizeWorks(json.results ?? [], filterUsed);
+        return JSON.parse(body) as { results: Array<Record<string, unknown>> };
       } catch (httpsErr) {
         const httpsDetails = extractErrorDetails(httpsErr);
         attemptErrors.push(`attempt ${attempt} https failed: ${httpsDetails}`);
@@ -261,7 +264,53 @@ export async function fetchOpenAlexWorks({
     }
   }
 
-  throw new Error(
-    `OpenAlex request failed after 3 attempts. URL=${url}. Details=${attemptErrors.join(" | ")}`
-  );
+  throw new Error(`OpenAlex page request failed. URL=${url}. Details=${attemptErrors.join(" | ")}`);
+}
+
+export async function fetchOpenAlexWorks({
+  fromDate,
+  institutionIds = DEFAULT_INSTITUTION_IDS,
+  perPage = 100,
+  maxPages = 3,
+  timeoutMs = 15000,
+  mode = "targeted",
+}: {
+  fromDate: string;
+  institutionIds?: string[];
+  perPage?: number;
+  maxPages?: number;
+  timeoutMs?: number;
+  mode?: IngestMode;
+}): Promise<OpenAlexFetchResult> {
+  const safeMaxPages = Math.min(Math.max(maxPages, 1), 10);
+  const filterUsed = getFilterString(fromDate, institutionIds, mode);
+  const byId = new Map<string, OpenAlexNormalizedWork>();
+  const requestUrls: string[] = [];
+  let pagesFetched = 0;
+
+  for (let page = 1; page <= safeMaxPages; page += 1) {
+    const url = buildOpenAlexUrl({ fromDate, institutionIds, perPage, page, mode });
+    requestUrls.push(url);
+    console.info(`[OpenAlex] Request URL (page ${page}): ${url}`);
+
+    const json = await fetchOpenAlexPage(url, timeoutMs);
+    const normalized = normalizeWorks(json.results ?? [], filterUsed);
+    console.info(`[OpenAlex] Page ${page} returned ${normalized.length} normalized rows`);
+
+    pagesFetched += 1;
+    if (normalized.length === 0) {
+      break;
+    }
+
+    for (const row of normalized) {
+      byId.set(row.id, row);
+    }
+  }
+
+  return {
+    works: Array.from(byId.values()),
+    pagesFetched,
+    filtersUsed: [filterUsed],
+    requestUrls,
+  };
 }

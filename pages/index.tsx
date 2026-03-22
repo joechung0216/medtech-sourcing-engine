@@ -30,11 +30,14 @@ type ApiResponse = {
 
 type IngestResponse = {
   ok: boolean;
+  mode: "targeted" | "exploration";
   fromDate: string;
   openAlexUrl: string;
   openAlexCount: number;
   patentCount: number;
   insertedOrUpdated: number;
+  fetchedPageCount: number;
+  targetedValidationApplied: boolean;
   sample: Array<{
     id: string;
     source: string;
@@ -68,6 +71,9 @@ export default function DashboardPage() {
   const [institution, setInstitution] = useState("");
   const [minScore, setMinScore] = useState("0");
   const [sort, setSort] = useState<"score_desc" | "newest">("score_desc");
+  const [ingestMode, setIngestMode] = useState<"targeted" | "exploration">("targeted");
+  const [ingestFromDate, setIngestFromDate] = useState("");
+  const [ingestMaxPages, setIngestMaxPages] = useState("3");
 
   const [loading, setLoading] = useState(false);
   const [ingestLoading, setIngestLoading] = useState(false);
@@ -123,11 +129,12 @@ export default function DashboardPage() {
     setError(null);
     setIngestMessage(null);
     try {
-      const fromDate = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+      const fromDate = ingestFromDate || undefined;
+      const maxPages = Math.max(1, Number(ingestMaxPages || "3"));
       const response = await fetch("/api/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromDate }),
+        body: JSON.stringify({ mode: ingestMode, fromDate, maxPages }),
       });
 
       const json = (await response.json()) as IngestResponse;
@@ -135,7 +142,9 @@ export default function DashboardPage() {
         throw new Error(json.error || `Ingest failed: ${response.status}`);
       }
 
-      setIngestMessage(`Ingested ${json.insertedOrUpdated} opportunities (${json.openAlexCount} OpenAlex + ${json.patentCount} patents).`);
+      setIngestMessage(
+        `Ingested ${json.insertedOrUpdated} opportunities in ${json.mode} mode (${json.openAlexCount} OpenAlex + ${json.patentCount} patents, ${json.fetchedPageCount} pages, validation ${json.targetedValidationApplied ? "on" : "off"}).`
+      );
       await loadData();
     } catch (err) {
       setError((err as Error).message);
@@ -162,6 +171,18 @@ export default function DashboardPage() {
             {ingestLoading ? "Ingesting..." : "Refresh / Ingest"}
           </button>
         </div>
+
+        <section className="mb-4 rounded bg-white p-4 shadow">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <select value={ingestMode} onChange={(e) => setIngestMode(e.target.value as "targeted" | "exploration")} className="rounded border p-2">
+              <option value="targeted">Targeted mode</option>
+              <option value="exploration">Exploration mode</option>
+            </select>
+            <input value={ingestFromDate} onChange={(e) => setIngestFromDate(e.target.value)} type="date" className="rounded border p-2" />
+            <input value={ingestMaxPages} onChange={(e) => setIngestMaxPages(e.target.value)} type="number" min={1} max={10} className="rounded border p-2" placeholder="Max pages" />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Ingest controls: mode, optional fromDate override, and maxPages (default 3).</p>
+        </section>
 
         <form onSubmit={onSubmit} className="mb-4 rounded bg-white p-4 shadow">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">

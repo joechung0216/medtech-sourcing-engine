@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { classifyOpportunity } from "../../lib/classify";
 import { initDb, upsertOpportunities } from "../../lib/db";
-import { buildOpenAlexUrl, fetchOpenAlexWorks } from "../../lib/openalex";
+import { buildOpenAlexUrl, fetchOpenAlexWorks, type IngestMode } from "../../lib/openalex";
 import { fetchPatentOpportunitiesStub } from "../../lib/patents";
 import { scoreOpportunity } from "../../lib/score";
 
@@ -26,17 +26,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     initDb();
 
-    const fromDate = typeof req.body?.fromDate === "string" ? req.body.fromDate : new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
-    const openAlexUrl = buildOpenAlexUrl({ fromDate });
+    const mode: IngestMode = req.body?.mode === "exploration" ? "exploration" : "targeted";
+    const fromDate =
+      typeof req.body?.fromDate === "string"
+        ? req.body.fromDate
+        : new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
+    const perPage = typeof req.body?.perPage === "number" ? req.body.perPage : 100;
+    const maxPages = typeof req.body?.maxPages === "number" ? req.body.maxPages : 3;
+
+    const openAlexUrl = buildOpenAlexUrl({ fromDate, perPage, page: 1, mode });
 
     let openAlex;
+    let pageCount = 0;
+    const validationApplied = mode === "targeted";
+    let filtersUsed: string[] = [];
+
     try {
-      const fetchedOpenAlex = await fetchOpenAlexWorks({ fromDate });
-      openAlex = keepApprovedOpenAlexRows(fetchedOpenAlex);
+      const fetchedOpenAlex = await fetchOpenAlexWorks({ fromDate, perPage, maxPages, mode });
+      openAlex = validationApplied ? keepApprovedOpenAlexRows(fetchedOpenAlex.works) : fetchedOpenAlex.works;
+      pageCount = fetchedOpenAlex.pagesFetched;
+      filtersUsed = fetchedOpenAlex.filtersUsed;
     } catch (error) {
       const detailedError = error instanceof Error ? error.message : String(error);
       return res.status(502).json({
         ok: false,
+        mode,
         fromDate,
         openAlexUrl,
         error: detailedError,
@@ -86,7 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         matched_institution_names: matchedNames.join(", ") || null,
         source_reason:
           item.source === "openalex"
-            ? `Matched OpenAlex institution filter: ${matchedNames.join(", ")}`
+            ? `Matched OpenAlex institution filter: ${matchedNames.join(", ") || "Exploration mode broad literature"}`
             : "Matched patent stub provider",
         openalex_filter_used: item.source === "openalex" ? (item as { openalex_filter_used?: string }).openalex_filter_used ?? null : null,
         raw_json: JSON.stringify(item.raw),
@@ -97,8 +111,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     return res.status(200).json({
       ok: true,
+      mode,
       fromDate,
       openAlexUrl,
+      openAlexFilterSummary: filtersUsed,
+      fetchedPageCount: pageCount,
+      targetedValidationApplied: validationApplied,
       openAlexCount: openAlex.length,
       patentCount: patents.length,
       insertedOrUpdated: outcome.insertedOrUpdated,
@@ -112,8 +130,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         score_total: item.score_total,
         location: item.location,
         source_reason: item.source_reason,
-        matched_institution_ids: item.matched_institution_ids,
-        matched_institution_names: item.matched_institution_names,
       })),
     });
   } catch (error) {
