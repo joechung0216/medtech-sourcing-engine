@@ -30,6 +30,7 @@ export type OpportunityFilters = {
   minScore?: number;
   fromDate?: string;
   q?: string;
+  sort?: "score_desc" | "newest";
   limit?: number;
   offset?: number;
 };
@@ -157,11 +158,16 @@ export function queryOpportunities(filters: OpportunityFilters) {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const offset = Math.max(filters.offset ?? 0, 0);
 
+  const orderByClause =
+    filters.sort === "newest"
+      ? "ORDER BY date DESC, COALESCE(score_total, 0) DESC"
+      : "ORDER BY COALESCE(score_total, 0) DESC, date DESC";
+
   const results = db
     .prepare(
       `SELECT * FROM opportunities
        ${whereClause}
-       ORDER BY COALESCE(score_total, 0) DESC, date DESC
+       ${orderByClause}
        LIMIT @limit OFFSET @offset`
     )
     .all({ ...params, limit, offset });

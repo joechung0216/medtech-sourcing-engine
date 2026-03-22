@@ -10,7 +10,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     initDb();
 
-    const { category, location, institution, minScore, fromDate, q, limit, offset } = req.query;
+    const { category, location, institution, minScore, fromDate, q, sort, limit, offset } = req.query;
 
     const data = queryOpportunities({
       category: typeof category === "string" ? category : undefined,
@@ -19,6 +19,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       minScore: typeof minScore === "string" ? Number(minScore) : undefined,
       fromDate: typeof fromDate === "string" ? fromDate : undefined,
       q: typeof q === "string" ? q : undefined,
+      sort: sort === "newest" ? "newest" : "score_desc",
       limit: typeof limit === "string" ? Number(limit) : undefined,
       offset: typeof offset === "string" ? Number(offset) : undefined,
     });
