@@ -17,10 +17,10 @@ export type OpenAlexNormalizedWork = {
 const OPENALEX_WORKS_URL = "https://api.openalex.org/works";
 
 export const DEFAULT_INSTITUTION_IDS = [
-  "I149506389",
-  "I71493762",
-  "I4210100500",
-  "I5014037",
+  "I149506389", // Rice University
+  "I71493762", // Baylor College of Medicine
+  "I421010500", // UTHealth Houston (The University of Texas Health Science Center at Houston)
+  "I5014037", // The University of Texas MD Anderson Cancer Center
 ];
 
 type RawAuthorship = {
