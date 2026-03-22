@@ -1,40 +1,126 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# MedTech Sourcing Engine (MVP)
 
-## Getting Started
+A lightweight Next.js + TypeScript MVP that ingests recent medtech literature from OpenAlex, normalizes/scoring opportunities in SQLite, and exposes a simple dashboard + APIs.
 
-First, run the development server:
+## Stack
+
+- Next.js (Pages Router)
+- TypeScript
+- Tailwind CSS
+- SQLite via `better-sqlite3`
+
+## Project structure
+
+- `lib/openalex.ts` - OpenAlex fetch + normalization
+- `lib/patents.ts` - patent stub provider (mock opportunities)
+- `lib/classify.ts` - keyword-based category classifier
+- `lib/score.ts` - explainable 0–100 scoring
+- `lib/db.ts` - SQLite init/upsert/query helpers
+- `db/init.ts` - one-shot DB initialization script
+- `pages/api/ingest.ts` - POST ingestion endpoint
+- `pages/api/opportunities.ts` - GET filterable opportunities endpoint
+- `pages/index.tsx` - dashboard UI
+
+## Data model
+
+`opportunities` table:
+
+```sql
+CREATE TABLE opportunities (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  title TEXT NOT NULL,
+  abstract TEXT,
+  authors TEXT,
+  institutions TEXT,
+  date TEXT,
+  doi TEXT,
+  url TEXT,
+  category TEXT,
+  keywords TEXT,
+  score_total REAL,
+  score_novelty REAL,
+  score_momentum REAL,
+  score_commercial REAL,
+  score_institution REAL,
+  location TEXT,
+  raw_json TEXT,
+  ingested_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+Indexes:
+- `category`
+- `score_total DESC`
+- `date DESC`
+
+## Setup
+
+```bash
+npm install
+```
+
+If your environment blocks package downloads, ensure these packages are available:
+
+- `better-sqlite3`
+
+## Initialize DB
+
+```bash
+npm run db:init
+```
+
+This creates `db/data/medtech.sqlite` and the required schema/indexes.
+
+## Run locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+## Trigger ingestion
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+From another terminal:
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+```bash
+curl -X POST http://localhost:3000/api/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"fromDate":"2026-02-01"}'
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Learn More
+If OpenAlex is unreachable, force mock literature fallback:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+curl -X POST 'http://localhost:3000/api/ingest?useMockFallback=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"fromDate":"2026-02-01","useMockFallback":true}'
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+## Query opportunities API
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Example:
 
-## Deploy on Vercel
+```bash
+curl 'http://localhost:3000/api/opportunities?category=imaging&minScore=20&limit=10'
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Supported query params:
+- `category`
+- `location`
+- `institution`
+- `minScore`
+- `fromDate`
+- `q`
+- `limit`
+- `offset`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+## Future improvements
+
+- Replace patent stub with real USPTO/other source integration.
+- Add periodic ingestion scheduling.
+- Improve NLP-based classification.
+- Add richer ranking features and explainability UI.
+- Add proper analytics and export workflows.
